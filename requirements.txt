@@ -1,0 +1,11 @@
+streamlit
+langchain
+langchain-openai
+langchain-community
+chromadb
+pydantic
+python-dotenv
+tenacity
+requests
+beautifulsoup4
+schedule
