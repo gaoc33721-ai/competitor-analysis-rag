@@ -2,11 +2,25 @@ import streamlit as st
 import json
 import os
 import subprocess
+import time
 from datetime import datetime
 import pandas as pd
 
 # 页面配置
 st.set_page_config(page_title="素材系统 - 管理后台", layout="wide", page_icon="⚙️")
+
+# Config file path
+CONFIG_FILE = "scheduler_config.json"
+
+def load_scheduler_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {"frequency": "每天", "run_time": "02:00", "queries": ["TCL Smart TV", "Samsung Refrigerator", "LG Washing Machine"]}
+
+def save_scheduler_config(config):
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
 st.title("⚙️ 竞品素材监控系统 - 管理后台")
 st.markdown("轻量级系统运行状态监控与数据管理平台。")
 
@@ -96,7 +110,7 @@ with col2:
     st.subheader("🛠️ 系统控制台")
     
     st.markdown("**常规全量更新**")
-    st.markdown("此操作将拉起爬虫自动发现并更新 TCL、Samsung、LG 的产品。")
+    st.markdown("此操作将拉起爬虫自动发现并更新日常监控关键词相关的产品素材。")
     if st.button("▶️ 运行常规流水线", type="primary"):
         with st.spinner("流水线运行中，请勿关闭页面..."):
             try:
@@ -160,6 +174,37 @@ with col2:
                         st.text(e.stderr)
                 except Exception as e:
                     st.error(f"❌ 发生未知错误: {str(e)}")
+                
+    st.markdown("---")
+    st.markdown("**⏰ 自动化定时抓取配置**")
+    st.markdown("设置后台自动运行的频率、时间和要抓取的默认目标。")
+    
+    current_config = load_scheduler_config()
+    
+    with st.form("scheduler_form"):
+        freq_options = ["每天", "每 3 天", "每周一", "每月 1 号"]
+        current_freq = current_config.get("frequency", "每天")
+        if current_freq not in freq_options:
+            current_freq = "每天"
+            
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            new_freq = st.selectbox("执行频率", options=freq_options, index=freq_options.index(current_freq))
+        with col_f2:
+            new_time = st.time_input("执行时间", value=datetime.strptime(current_config.get("run_time", "02:00"), "%H:%M").time())
+            
+        new_queries = st.text_area("日常监控关键词 (每行一个)", value="\n".join(current_config.get("queries", [])))
+        
+        submitted = st.form_submit_button("💾 保存配置")
+        if submitted:
+            queries_list = [q.strip() for q in new_queries.split('\n') if q.strip()]
+            new_config = {
+                "frequency": new_freq,
+                "run_time": new_time.strftime("%H:%M"),
+                "queries": queries_list
+            }
+            save_scheduler_config(new_config)
+            st.success(f"✅ 配置已保存！后台服务将 {new_config['frequency']} 于 {new_config['run_time']} 自动抓取 {len(queries_list)} 个目标。")
                 
     st.markdown("---")
     st.markdown("**调度器状态**")

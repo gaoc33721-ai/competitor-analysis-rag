@@ -1,0 +1,11 @@
+{
+  "frequency": "每 3 天",
+  "run_time": "01:15",
+  "queries": [
+    "TCL TV",
+    "Sony TV",
+    "Samsung Refrigerator",
+    "LG Washing Machine",
+    "Midea Refrigerator"
+  ]
+}

@@ -84,12 +84,19 @@ def fetch_amazon_product_data(custom_asins=None, custom_queries=None):
     """
     print("[Step 1] Starting data scraping pipeline (Dynamic Discovery via Rainforest API)...")
     
+    # 从配置文件中读取默认的查询词
+    default_queries = ["TCL Smart TV", "Samsung Refrigerator", "LG Washing Machine"]
+    try:
+        import json
+        with open("scheduler_config.json", "r", encoding="utf-8") as f:
+            config = json.load(f)
+            if "queries" in config and config["queries"]:
+                default_queries = config["queries"]
+    except Exception as e:
+        print(f"  ⚠️ Could not load scheduler_config.json, using fallback queries. Error: {e}")
+        
     # MVP Core Requirements
-    search_queries = custom_queries if custom_queries else [
-        "TCL Smart TV",
-        "Samsung Refrigerator",
-        "LG Washing Machine"
-    ]
+    search_queries = custom_queries if custom_queries else default_queries
     
     asins_to_fetch = set(custom_asins) if custom_asins else set()
     

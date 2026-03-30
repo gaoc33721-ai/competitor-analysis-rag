@@ -120,7 +120,9 @@ def init_system(api_key: str):
             continue
             
         # Create a rich text representation for the vector to understand
-        content = f"渠道: {item.get('channel', '未知')}\n品牌: {item['brand']}\n品类: {item.get('category', '未知')}\n标题: {item['title']}\n文案: {item['original_copy']}\nAI标签: {', '.join(item['ai_tags'])}\nAI分析: {item['ai_analysis']}"
+        # Note: category is inside metadata dict
+        category = item.get('metadata', {}).get('category', '未知')
+        content = f"渠道: {item.get('channel', '未知')}\n品牌: {item['brand']}\n品类: {category}\n标题: {item['title']}\n文案: {item['original_copy']}\nAI标签: {', '.join(item['ai_tags'])}\nAI分析: {item['ai_analysis']}"
         texts.append(content)
         
         # ChromaDB cannot handle complex metadata (like dicts or nested lists)
@@ -189,8 +191,14 @@ if user_query := st.chat_input("例如：我想推一款针对职场新人的产
         with st.spinner("🔍 正在检索素材库并生成策略分析..."):
             try:
                 # 1. Retrieve documents
-                # 增加检索数量 k=4，提高相关文档的召回率，以应对跨品类的语义重叠
-                retrieved_docs = vectordb.similarity_search(user_query, k=4)
+                # 使用最大边际相关性(MMR)检索，提高检索结果的多样性，防止被某个品牌(如三星/LG)霸榜
+                # 增大 fetch_k 和 k，确保能覆盖到像 Midea 这种数量较少但符合条件的素材
+                retrieved_docs = vectordb.max_marginal_relevance_search(
+                    user_query, 
+                    k=15, 
+                    fetch_k=50,
+                    lambda_mult=0.5 # 0.5 是相关性与多样性的平衡
+                )
                 
                 # Prepare context and images
                 context_str = ""
@@ -228,21 +236,36 @@ if user_query := st.chat_input("例如：我想推一款针对职场新人的产
 
                 # 2. Generate response using LLM
                 # 增强 Prompt，要求模型在回答时返回一个它认为真正相关的素材 ID 列表
+                # 融入业务人员的《竞品展示调研》标准进行评判
                 prompt = PromptTemplate(
                     input_variables=["context", "query"],
-                    template="""你是一个资深的营销策略专家。请**严格且仅根据**以下我为你提供的【竞品素材库检索结果】（Context），回答用户的提问（Query）。
+                    template="""你是一个资深的家电/3C数码营销策略专家。请**严格且仅根据**以下我为你提供的【竞品素材库检索结果】（Context），回答用户的提问（Query）。
                     
                     【极其重要的约束条件】：
-                    1. 你的回答**绝对不能**脱离提供的 [检索到的素材信息] 进行凭空捏造（幻觉）。如果检索到的素材中没有与用户提问强相关的信息（例如用户问空气炸锅，但素材只有冰箱），请明确告诉用户：“目前的素材库中没有抓取到相关数据”。
-                    2. 回答时，必须明确引用具体是哪一款产品的素材（如：根据某某型号的文案...）。
-                    3. 请提炼出它们的优秀之处（例如：文案技巧、情绪价值、目标人群定位、核心卖点）。
-                    4. 结构清晰，分点作答，语气专业且富有洞察力。
+                    1. 你的回答**绝对不能**脱离提供的 [检索到的素材信息] 进行凭空捏造（幻觉）。
+                    2. **品类严格对齐（零容忍张冠李戴）**：
+                       - 在阅读每一条素材前，必须先识别用户提问的核心品类（如“冰箱”、“电视”、“洗衣机”、“空气炸锅”等）。
+                       - 严格对比素材内容中的【品类】字段。注意：素材中的品类可能是英文（如 Refrigerator 对应 冰箱，Washing Machine 对应 洗衣机，TV 对应 电视），请准确进行中英文品类匹配。
+                       - 如果素材品类与用户提问品类不一致（例如用户问冰箱，素材是 Washing Machine 或 TV），必须**直接无视并彻底抛弃**该素材。
+                       - 绝对禁止任何形式的跨品类强行推理或联想。
+                       - **绝对禁止**在回答中提及、列出或分析那些被抛弃的素材（例如，不要为了说明“没有LG冰箱”而去列出LG洗衣机，也不要解释为什么抛弃它们，直接当它们不存在，连提都不要提）。
+                    3. 如果过滤后没有任何与用户提问强相关的同品类素材，请明确且仅回复：“目前的素材库中没有抓取到该品类的相关数据，建议前往后台添加相关抓取任务”。
+                    4. 回答时，必须明确引用具体是哪一款产品的素材（如：根据某某型号的文案...）。
+                    5. **品牌中英文同义识别**：必须将同一个品牌的中英文名称视为完全等同（例如：“三星”与“Samsung”、“美的”与“Midea”、“海尔”与“Haier”等）。在分析和回答时，绝对不能将它们当成两个不同的品牌进行对比或声明找不到该品牌。
+                    6. **负向查询处理**：如果用户要求“除XX品牌外”或“不要XX品牌”，你必须在回答中彻底排除该品牌的任何素材，只分析和展示剩下的其他品牌素材。
+                    7. **回答精简原则**：不要在开头把所有相关素材机械地罗列一遍（不要写“根据提供的信息，我们有以下...”这种废话）。直接切入正题，给出你推荐的产品素材，并深度分析它的亮点和适用场景。
+                    8. **关注视觉素材表现**：在介绍亮点时，不要只重复产品本身的功能参数（如“容量大”、“制冷快”），你必须**重点分析该素材在视觉呈现和电商文案排版上的优点**（例如“主图使用了直观的对比”、“文案采用了场景化代入”等），让业务人员知道这张“图/文”为什么值得参考。
+                    
+                    【优质素材的业务评价标准】：
+                    当你在提炼素材的优秀之处时，请参考以下业务团队沉淀的“优质素材特征”，如果素材中包含以下亮点，请重点指出：
+                    - **直观的规模/尺寸对比**（例如：与身高对比、用“一台顶三台”等拆解容积）。
+                    - **功能/技术可视化**（例如：主图中加入制冷范围、防水产品加入水元素、透明视窗敲击拟声词、动态内部构造拆解）。
+                    - **场景化与互动性**（例如：展示室内室外双场景、小家电充当家居摆件、在同一画面直观展示大小）。
+                    - **辅助决策与信任感**（例如：主图带保修信息、对比表格突出优势、Q&A和KOC评价引导、安装测量指南）。
                     
                     【相关素材过滤】：
-                    在你回答的最后，必须新起一行，输出一个你认为真正解答了用户问题的素材编号列表，格式如下：
+                    在你回答的最后，必须新起一行，输出一个你认为真正解答了用户问题的素材编号列表，格式如下（如果没有则填无）：
                     [相关素材编号]: 1, 2
-                    如果没有相关的，输出：
-                    [相关素材编号]: 无
                     
                     [检索到的素材信息]
                     {context}
@@ -261,35 +284,50 @@ if user_query := st.chat_input("例如：我想推一款针对职场新人的产
                 # 3. 后处理：根据 LLM 的判断过滤掉不相关的图片
                 filtered_images = []
                 import re
-                match = re.search(r'\[相关素材编号\]:\s*([\d,\s]+)', answer)
+                
+                # 兼容大模型可能输出的不同格式，如 [相关素材编号]: 4 或 [相关素材编号]:4，甚至是 [相关素材编号]: 4, 12
+                # 提取所有的数字，只要有数字，就把它作为候选
+                # 注意避免提取到空或无
+                match = re.search(r'\[相关素材编号\]:\s*([0-9,\s]+)', answer)
                 if match:
                     indices_str = match.group(1)
-                    valid_indices = [int(x.strip()) - 1 for x in indices_str.split(',') if x.strip().isdigit()]
-                    for idx in valid_indices:
-                        if 0 <= idx < len(images_to_show):
-                            filtered_images.append(images_to_show[idx])
+                    # 只有当里面确实包含数字时才处理
+                    if any(char.isdigit() for char in indices_str):
+                        valid_indices = [int(x.strip()) - 1 for x in indices_str.split(',') if x.strip().isdigit()]
+                        for idx in valid_indices:
+                            if 0 <= idx < len(images_to_show):
+                                filtered_images.append(images_to_show[idx])
                 
                 # 移除回答中给程序看的特殊标记
-                display_answer = re.sub(r'\[相关素材编号\]:.*', '', answer, flags=re.DOTALL).strip()
+                display_answer = re.sub(r'\[相关素材编号\].*', '', answer, flags=re.DOTALL).strip()
                 
                 # Display text
                 st.markdown(display_answer)
                 
                 # Display images (only the relevant ones filtered by LLM)
                 if filtered_images:
+                    # 再次通过URL去重，防止大模型输出了重复的编号或者指向了重复的URL
+                    unique_filtered_images = []
+                    final_seen_urls = set()
+                    for img in filtered_images:
+                        if img["url"] not in final_seen_urls:
+                            final_seen_urls.add(img["url"])
+                            unique_filtered_images.append(img)
+                            
                     st.markdown("**优秀竞品素材参考：**")
-                    cols = st.columns(len(filtered_images))
-                    for idx, img_info in enumerate(filtered_images):
+                    cols = st.columns(len(unique_filtered_images))
+                    for idx, img_info in enumerate(unique_filtered_images):
                         with cols[idx % len(cols)]:
                             st.image(img_info["url"], caption=img_info["caption"], use_container_width=True)
                             if img_info.get("source_url") and img_info["source_url"] != "#":
                                 st.markdown(f"[🔗 查看原始页面来源]({img_info['source_url']})")
                 
                 # Save to history
+                # 修复：存入历史记录的图片也必须是经过过滤的图片，而不是所有召回的图片
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": answer,
-                    "images": images_to_show
+                    "images": unique_filtered_images if filtered_images else []
                 })
                 
             except Exception as e:
