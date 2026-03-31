@@ -117,8 +117,9 @@ with col2:
                 env = os.environ.copy()
                 env["PYTHONIOENCODING"] = "utf-8"
                 
+                import sys
                 result = subprocess.run(
-                    ["python", "pipeline.py"],
+                    [sys.executable, "pipeline.py"],
                     capture_output=True,
                     text=True,
                     check=True,
@@ -157,8 +158,9 @@ with col2:
                     env = os.environ.copy()
                     env["PYTHONIOENCODING"] = "utf-8"
                     
+                    import sys
                     result = subprocess.run(
-                        ["python", "pipeline.py", cmd_arg, custom_input.strip()],
+                        [sys.executable, "pipeline.py", cmd_arg, custom_input.strip()],
                         capture_output=True,
                         text=True,
                         check=True,
