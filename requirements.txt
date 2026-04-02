@@ -6,6 +6,7 @@ chromadb
 pydantic
 python-dotenv
 tenacity
+protobuf==3.20.3
 requests
 beautifulsoup4
 schedule
