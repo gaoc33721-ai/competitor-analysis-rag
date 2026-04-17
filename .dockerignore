@@ -1,0 +1,7 @@
+.git
+__pycache__/
+*.pyc
+.env
+chroma_db_minimax/
+*.zip
+.temp/
