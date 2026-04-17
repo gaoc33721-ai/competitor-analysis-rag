@@ -3,9 +3,6 @@ name: Build & Push to ECR
 on:
   push:
     branches: [ "main" ]
-    paths:
-      - "competitor_analysis_mvp/**"
-      - ".github/workflows/ecr-build-push.yml"
   workflow_dispatch: {}
 
 permissions:
@@ -15,8 +12,8 @@ permissions:
 env:
   AWS_REGION: eu-central-1
   ECR_REPOSITORY: competitor-analysis-rag
-  IMAGE_CONTEXT: competitor_analysis_mvp
-  IMAGE_FILE: competitor_analysis_mvp/Dockerfile
+  IMAGE_CONTEXT: .
+  IMAGE_FILE: Dockerfile
 
 jobs:
   build-and-push:
@@ -26,18 +23,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC)
-        if: ${{ secrets.AWS_ROLE_TO_ASSUME != '' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Configure AWS credentials (Access Keys)
-        if: ${{ secrets.AWS_ROLE_TO_ASSUME == '' }}
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
