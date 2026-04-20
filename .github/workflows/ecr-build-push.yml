@@ -14,6 +14,7 @@ env:
   ECR_REPOSITORY: competitor-analysis-rag
   IMAGE_CONTEXT: .
   IMAGE_FILE: Dockerfile
+  ROLE_TO_ASSUME_RAW: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
 jobs:
   build-and-push:
@@ -22,10 +23,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate AWS_ROLE_TO_ASSUME
+        shell: bash
+        run: |
+          # Do not print the secret value. Only validate presence and format.
+          ROLE_TO_ASSUME="$(printf '%s' "${ROLE_TO_ASSUME_RAW}" | tr -d '\r' | xargs)"
+          if [ -z "${ROLE_TO_ASSUME}" ]; then
+            echo "AWS_ROLE_TO_ASSUME is empty. Please set repository secret AWS_ROLE_TO_ASSUME to a valid IAM Role ARN."
+            exit 1
+          fi
+          if ! [[ "${ROLE_TO_ASSUME}" =~ ^arn:aws:iam::[0-9]{12}:role\/.+$ ]]; then
+            echo "AWS_ROLE_TO_ASSUME format invalid. It must look like: arn:aws:iam::123456789012:role/RoleName"
+            exit 1
+          fi
+          echo "AWS_ROLE_TO_ASSUME looks valid."
+          echo "ROLE_TO_ASSUME=${ROLE_TO_ASSUME}" >> "${GITHUB_ENV}"
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
