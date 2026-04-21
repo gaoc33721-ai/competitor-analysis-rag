@@ -27,17 +27,29 @@ jobs:
         shell: bash
         run: |
           # Do not print the secret value. Only validate presence and format.
-          ROLE_TO_ASSUME="$(printf '%s' "${ROLE_TO_ASSUME_RAW}" | tr -d '\r' | xargs)"
+          ROLE_TO_ASSUME_RAW_STRIPPED="$(printf '%s' "${ROLE_TO_ASSUME_RAW}" | tr -d '\r\n')"
+          ROLE_TO_ASSUME="$(printf '%s' "${ROLE_TO_ASSUME_RAW_STRIPPED}" | xargs)"
           if [ -z "${ROLE_TO_ASSUME}" ]; then
             echo "AWS_ROLE_TO_ASSUME is empty. Please set repository secret AWS_ROLE_TO_ASSUME to a valid IAM Role ARN."
             exit 1
           fi
-          if ! [[ "${ROLE_TO_ASSUME}" =~ ^arn:aws:iam::[0-9]{12}:role\/.+$ ]]; then
-            echo "AWS_ROLE_TO_ASSUME format invalid. It must look like: arn:aws:iam::123456789012:role/RoleName"
-            exit 1
-          fi
-          echo "AWS_ROLE_TO_ASSUME looks valid."
-          echo "ROLE_TO_ASSUME=${ROLE_TO_ASSUME}" >> "${GITHUB_ENV}"
+          python - <<'PY'
+          import os, re, sys
+          s = os.environ.get("ROLE_TO_ASSUME", "")
+          bad = [(i, ord(c)) for i, c in enumerate(s) if (ord(c) > 127) or c.isspace()]
+          if bad:
+            sample = ", ".join(f"{i}:U+{cp:04X}" for i, cp in bad[:20])
+            print("AWS_ROLE_TO_ASSUME contains non-ASCII or whitespace characters:", sample)
+            sys.exit(1)
+          if not re.match(r"^arn:aws:iam::\d{12}:role\/[\w+=,.@\-\/]+$", s):
+            print("AWS_ROLE_TO_ASSUME format invalid. It must look like: arn:aws:iam::123456789012:role/RoleName")
+            sys.exit(1)
+          print("AWS_ROLE_TO_ASSUME looks valid.")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+            f.write(f"ROLE_TO_ASSUME={s}\n")
+          PY
+        env:
+          ROLE_TO_ASSUME: ${{ env.ROLE_TO_ASSUME_RAW }}
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
