@@ -7,23 +7,26 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from tenacity import retry, stop_after_attempt, wait_exponential
+from bedrock_utils import bedrock_converse, get_llm_provider
 
 # Load environment variables for API Key
 load_dotenv()
 MINIMAX_API_KEY = os.environ.get("MINIMAX_API_KEY")
 RAINFOREST_API_KEY = os.environ.get("RAINFOREST_API_KEY")
 
-if not MINIMAX_API_KEY:
-    raise ValueError("MINIMAX_API_KEY is not set in .env file")
-
-# Initialize MiniMax LLM
-llm = ChatOpenAI(
-    temperature=0.3,
-    model_name="abab6.5s-chat",
-    openai_api_key=MINIMAX_API_KEY,
-    openai_api_base="https://api.minimax.chat/v1",
-    max_tokens=1024
-)
+llm_provider = get_llm_provider()
+if llm_provider == "minimax":
+    if not MINIMAX_API_KEY:
+        raise ValueError("MINIMAX_API_KEY is not set in .env file (LLM_PROVIDER=minimax)")
+    llm = ChatOpenAI(
+        temperature=0.3,
+        model_name="abab6.5s-chat",
+        openai_api_key=MINIMAX_API_KEY,
+        openai_api_base="https://api.minimax.chat/v1",
+        max_tokens=1024,
+    )
+else:
+    llm = None
 
 # Prompt template for AI Analysis
 analysis_prompt = PromptTemplate(
@@ -214,10 +217,13 @@ def fetch_amazon_product_data(custom_asins=None, custom_queries=None):
     return structured_mock_data
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
-def analyze_with_llm(chain, title, copy):
-    """Call LLM with automatic retries if it fails."""
-    response = chain.invoke({"title": title, "copy": copy})
-    ai_output_str = response.content.strip()
+def analyze_with_llm(title, copy):
+    prompt_text = analysis_prompt.format(title=title, copy=copy)
+    if llm_provider == "minimax":
+        response = llm.invoke(prompt_text)
+        ai_output_str = response.content.strip()
+    else:
+        ai_output_str = bedrock_converse(prompt_text, temperature=0.3, max_tokens=1024).strip()
     
     # Clean up potential markdown formatting from LLM (e.g., ```json ... ```)
     if "```json" in ai_output_str:
@@ -234,17 +240,16 @@ def analyze_with_llm(chain, title, copy):
     return json.loads(ai_output_str)
 
 def process_with_ai(raw_data):
-    """Passes raw scraped data through MiniMax LLM to generate tags and analysis."""
-    print(f"[Step 2] Processing {len(raw_data)} items with MiniMax AI...")
+    """Passes raw scraped data through the configured LLM to generate tags and analysis."""
+    print(f"[Step 2] Processing {len(raw_data)} items with AI ({llm_provider})...")
     
     processed_data = []
-    chain = analysis_prompt | llm
     
     for i, item in enumerate(raw_data):
         print(f"  -> Analyzing item {i+1}: {item['brand']}...")
         try:
             # Call LLM with tenacity retry mechanism
-            ai_result = analyze_with_llm(chain, item["title"], item["original_copy"])
+            ai_result = analyze_with_llm(item["title"], item["original_copy"])
             
             # Merge AI results into the item
             item["ai_tags"] = ai_result.get("ai_tags", [])

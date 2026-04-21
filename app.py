@@ -6,6 +6,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence
+from bedrock_utils import BedrockTextEmbeddings, bedrock_converse, get_llm_provider
 
 # Load environment variables
 load_dotenv()
@@ -27,8 +28,15 @@ with st.sidebar:
 # Get API key from environment
 minimax_api_key = os.environ.get("MINIMAX_API_KEY")
 
-if not minimax_api_key or minimax_api_key == "your_minimax_api_key_here":
-    st.error("⚠️ 系统管理员尚未配置 MINIMAX_API_KEY。请在项目根目录的 .env 文件中进行配置。")
+llm_provider = get_llm_provider()
+embedding_provider = (os.getenv("EMBEDDING_PROVIDER") or llm_provider).strip().lower()
+
+if embedding_provider == "minimax" and (not minimax_api_key or minimax_api_key == "your_minimax_api_key_here"):
+    st.error("⚠️ 系统管理员尚未配置 MINIMAX_API_KEY。请在项目根目录的 .env 文件中进行配置，或切换为 Bedrock Embedding。")
+    st.stop()
+
+if llm_provider == "minimax" and (not minimax_api_key or minimax_api_key == "your_minimax_api_key_here"):
+    st.error("⚠️ 系统管理员尚未配置 MINIMAX_API_KEY。请在项目根目录的 .env 文件中进行配置，或切换为 Bedrock LLM。")
     st.stop()
 
 # --- Custom MiniMax Embeddings ---
@@ -76,14 +84,16 @@ class MiniMaxEmbeddings(Embeddings):
 
 # --- Initialize DB and Models ---
 @st.cache_resource(show_spinner=False, hash_funcs={str: str})
-def init_system(api_key: str):
-    # Use MiniMax OpenAI-compatible endpoint
-    os.environ["OPENAI_API_KEY"] = api_key
-    os.environ["OPENAI_API_BASE"] = "https://api.minimax.chat/v1"
-    
-    # Using Custom MiniMax Embeddings instead of OpenAI wrapper
-    embeddings = MiniMaxEmbeddings(api_key=api_key)
-    persist_directory = "./chroma_db_minimax"
+def init_system(embedding_provider_name: str, api_key: str | None):
+    provider_name = (embedding_provider_name or "").strip().lower()
+    if provider_name == "minimax":
+        os.environ["OPENAI_API_KEY"] = api_key or ""
+        os.environ["OPENAI_API_BASE"] = "https://api.minimax.chat/v1"
+        embeddings = MiniMaxEmbeddings(api_key=api_key or "")
+        persist_directory = "./chroma_db_minimax"
+    else:
+        embeddings = BedrockTextEmbeddings()
+        persist_directory = "./chroma_db_bedrock"
     
     # Load mock data
     with open("mock_data.json", "r", encoding="utf-8") as f:
@@ -150,17 +160,17 @@ def init_system(api_key: str):
 
 with st.spinner("正在初始化大语言模型和向量数据库..."):
     try:
-        vectordb, mock_data = init_system(minimax_api_key)
-        # Use MiniMax Text-01 (M2.5/M2.7 generation) model via their OpenAI-compatible endpoint
-        # The latest text models in MiniMax are typically accessed via 'abab6.5s-chat'
-        # Increased max_tokens to ensure complete responses for marketing suggestions
-        llm = ChatOpenAI(
-            temperature=0.7, 
-            model_name="abab6.5s-chat", 
-            openai_api_key=minimax_api_key, 
-            openai_api_base="https://api.minimax.chat/v1",
-            max_tokens=2048
-        )
+        vectordb, mock_data = init_system(embedding_provider, minimax_api_key)
+        if llm_provider == "minimax":
+            llm = ChatOpenAI(
+                temperature=0.7,
+                model_name="abab6.5s-chat",
+                openai_api_key=minimax_api_key,
+                openai_api_base="https://api.minimax.chat/v1",
+                max_tokens=2048
+            )
+        else:
+            llm = None
     except Exception as e:
         st.error(f"初始化失败，请检查 API Key 是否有效或网络是否畅通。错误信息：{e}")
         st.stop()
@@ -281,10 +291,12 @@ if user_query := st.chat_input("例如：我想推一款针对职场新人的产
                     [你的专业分析与建议]
                     """
                 )
-                
-                chain = prompt | llm
-                response = chain.invoke({"context": context_str, "query": user_query})
-                answer = response.content
+                prompt_text = prompt.format(context=context_str, query=user_query)
+                if llm_provider == "minimax":
+                    response = llm.invoke(prompt_text)
+                    answer = response.content
+                else:
+                    answer = bedrock_converse(prompt_text, temperature=0.7, max_tokens=2048)
                 
                 # 3. 后处理：根据 LLM 的判断过滤掉不相关的图片
                 filtered_images = []
