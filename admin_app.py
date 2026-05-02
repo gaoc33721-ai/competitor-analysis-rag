@@ -106,6 +106,10 @@ with col1:
     else:
         st.info("当前素材库为空，请先运行数据抓取流水线。")
 
+    st.markdown("---")
+    st.subheader("📝 运行日志 (最近 50 行)")
+    st.text_area("pipeline.log", value=load_logs(), height=300, disabled=True)
+
 with col2:
     st.subheader("🛠️ 系统控制台")
     
@@ -211,8 +215,3 @@ with col2:
     st.markdown("---")
     st.markdown("**调度器状态**")
     st.success("运行中 (假设由后台终端守护)")
-
-# --- 底部日志区 ---
-st.markdown("---")
-st.subheader("📝 运行日志 (最近 50 行)")
-st.text_area("pipeline.log", value=load_logs(), height=300, disabled=True)
