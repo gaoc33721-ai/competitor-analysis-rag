@@ -103,12 +103,17 @@ with col1:
             display_cols = ['id', 'brand', 'line', 'title']
             available_cols = [c for c in display_cols if c in df.columns]
             st.dataframe(df[available_cols], use_container_width=True)
+            
+        st.markdown("---")
+        st.subheader("📝 运行日志 (最近 50 行)")
+        st.text_area("pipeline.log", value=load_logs(), height=300, disabled=True, label_visibility="collapsed")
+        
     else:
         st.info("当前素材库为空，请先运行数据抓取流水线。")
-
-    st.markdown("---")
-    st.subheader("📝 运行日志 (最近 50 行)")
-    st.text_area("pipeline.log", value=load_logs(), height=300, disabled=True)
+        
+        st.markdown("---")
+        st.subheader("📝 运行日志 (最近 50 行)")
+        st.text_area("pipeline.log", value=load_logs(), height=300, disabled=True, label_visibility="collapsed")
 
 with col2:
     st.subheader("🛠️ 系统控制台")
